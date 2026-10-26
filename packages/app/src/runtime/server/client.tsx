@@ -9,6 +9,7 @@ import { createRefCountMap } from "@/runtime/server/refcount"
 import { createRequestQueue } from "@/runtime/server/request-queue"
 import { ServerScope } from "@/runtime/server/scope"
 import { useServer } from "./current"
+import { authResumeUrl, clearAuthResume } from "./auth-resume"
 
 type OpenCodeEventMap = { [Type in OpenCodeEvent["type"]]: Extract<OpenCodeEvent, { type: Type }> }
 
@@ -74,7 +75,27 @@ type ServerSDKBase = {
 
 function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerScope): ServerSDKBase {
   const platform = usePlatform()
-  const transport = createServerTransport({ http: server.http, fetch: platform.fetch })
+  const authResumeEnabled =
+    platform.platform === "web" && new URL(server.http.url).origin === window.location.origin
+  let authRedirecting = false
+  const transport = createServerTransport({
+    http: server.http,
+    fetch: platform.fetch,
+    onAuthenticationRedirect() {
+      if (!authResumeEnabled || authRedirecting) return
+      const target = authResumeUrl(window.location.href)
+      if (!target) return
+      authRedirecting = true
+      window.location.replace(target)
+    },
+    onAuthenticationRestored() {
+      if (!authResumeEnabled) return
+      const target = clearAuthResume(window.location.href)
+      if (!target) return
+      window.history.replaceState(window.history.state, "", target)
+      authRedirecting = false
+    },
+  })
 
   if (server.type === "extension") {
     createEffect(
@@ -121,13 +142,22 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   }
 }
 
-export function createServerTransport(input: { http: ServerConnection.HttpBase; fetch?: typeof globalThis.fetch }): {
+export function createServerTransport(input: {
+  http: ServerConnection.HttpBase
+  fetch?: typeof globalThis.fetch
+  onAuthenticationRedirect?: () => void
+  onAuthenticationRestored?: () => void
+}): {
   update(http: ServerConnection.HttpBase): ServerApi
   readonly url: string
   readonly api: ServerApi
   readonly pty: ReturnType<typeof createPtyClient>
 } {
-  const queue = createRequestQueue({ fetch: input.fetch ?? globalThis.fetch })
+  const queue = createRequestQueue({
+    fetch: input.fetch ?? globalThis.fetch,
+    onAuthenticationRedirect: input.onAuthenticationRedirect,
+    onAuthenticationRestored: input.onAuthenticationRestored,
+  })
 
   const build = (http: ServerConnection.HttpBase) => {
     const api = createApiForServer({ server: http, fetch: queue.fetch })

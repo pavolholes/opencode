@@ -35,6 +35,8 @@ function isSetupRequest(method: string, pathname: string) {
 
 export function createRequestQueue(input: {
   fetch: typeof globalThis.fetch
+  onAuthenticationRedirect?: () => void
+  onAuthenticationRestored?: () => void
   limit?: number
   slowLimit?: number
   stallMs?: number
@@ -56,6 +58,15 @@ export function createRequestQueue(input: {
   const waiting: Array<{ entry: Entry; start: () => void }> = []
   let warned = -Infinity
   let watcher: ReturnType<typeof setTimeout> | undefined
+
+  const inspect = (response: Response) => {
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+      input.onAuthenticationRedirect?.()
+      return response
+    }
+    if (response.ok) input.onAuthenticationRestored?.()
+    return response
+  }
 
   const describe = (entry: Entry) => ({ method: entry.method, url: entry.url, ms: now() - entry.at })
 
@@ -118,11 +129,13 @@ export function createRequestQueue(input: {
 
   const fetch: typeof globalThis.fetch = Object.assign(
     async (resource: RequestInfo | URL, init?: RequestInit) => {
-      const request = new Request(resource, init)
+      // API endpoints do not redirect. Keep proxy login redirects visible instead of following them into HTML or a
+      // cross-origin CORS failure, so the web app can start an interactive reauthentication navigation.
+      const request = new Request(resource, { ...init, redirect: "manual" })
       const pathname = new URL(request.url).pathname
 
       // The event stream is long-lived; never count it against the request budget.
-      if (pathname === "/api/event") return base(request)
+      if (pathname === "/api/event") return base(request).then(inspect)
       const entry = { method: request.method, url: request.url, at: now(), slow: isSlowRequest(pathname) }
       const queued = acquire(entry)
 
@@ -141,10 +154,12 @@ export function createRequestQueue(input: {
         isSetupRequest(request.method, pathname) ? setupHeadersTimeoutMs : headersTimeoutMs,
       )
 
-      return base(new Request(request, { signal: controller.signal })).finally(() => {
-        clearTimeout(timer)
-        release(entry)
-      })
+      return base(new Request(request, { signal: controller.signal }))
+        .then(inspect)
+        .finally(() => {
+          clearTimeout(timer)
+          release(entry)
+        })
     },
     // Bun's fetch type carries preconnect; the browser never calls it.
     { preconnect: () => {} },

@@ -131,3 +131,52 @@ test("rotates HTTP and PTY clients together", async () => {
     },
   ])
 })
+
+test("reports opaque API redirects so the web app can reauthenticate", async () => {
+  const response = new Response(null)
+  Object.defineProperties(response, {
+    type: { value: "opaqueredirect" },
+    status: { value: 0 },
+  })
+  let redirectMode: RequestRedirect | undefined
+  let redirects = 0
+  let recovered = 0
+  const fetch = Object.assign(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      redirectMode = request.redirect
+      return response
+    },
+    { preconnect() {} },
+  )
+  const transport = createServerTransport({
+    http: { url: "https://opencode.example" },
+    fetch,
+    onAuthenticationRedirect: () => redirects++,
+    onAuthenticationRestored: () => recovered++,
+  })
+
+  await expect(transport.api.server.info()).rejects.toMatchObject({
+    reason: "UnexpectedStatus",
+    message: "UnexpectedStatus: 0",
+  })
+  expect(redirectMode).toBe("manual")
+  expect(redirects).toBe(1)
+  expect(recovered).toBe(0)
+})
+
+test("clears the reauthentication state after a successful API response", async () => {
+  let recovered = 0
+  const fetch = Object.assign(
+    async () => Response.json({ version: "2.0.0-test", pid: 1, urls: [], paths: { tmp: "/tmp/opencode" } }),
+    { preconnect() {} },
+  )
+  const transport = createServerTransport({
+    http: { url: "https://opencode.example" },
+    fetch,
+    onAuthenticationRestored: () => recovered++,
+  })
+
+  await transport.api.server.info()
+  expect(recovered).toBe(1)
+})

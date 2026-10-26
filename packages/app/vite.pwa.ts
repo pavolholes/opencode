@@ -29,7 +29,12 @@ export function serviceWorker(directory: string) {
       inlineWorkboxRuntime: true,
       navigateFallback: "/index.html",
       // Pairing links must reach the server so it can set the session cookie.
-      navigateFallbackDenylist: [/^\/(?:api|auth)(?:\/|$)/, /^\/(?:_assets|assets)(?:\/|$)/],
+      navigateFallbackDenylist: [
+        /^\/(?:api|auth)(?:\/|$)/,
+        // The reverse proxy must see this top-level navigation and run its login flow.
+        /^\/__opencode_reauth(?:\/|$)/,
+        /^\/(?:_assets|assets)(?:\/|$)/,
+      ],
       // Include lazy chunks and non-JS dependencies, not just the startup bundle.
       globPatterns: ["**/*"],
       globIgnores: ["**/*.map", "_headers", "_redirects"],

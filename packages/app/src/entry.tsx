@@ -12,6 +12,7 @@ import { KeyboardInsets } from "@/runtime/platform/keyboard"
 import en from "@/runtime/i18n/en"
 import zh from "@/runtime/i18n/zh"
 import { authFromToken } from "@/runtime/server/api"
+import { authResumePath, authResumeTarget } from "@/runtime/server/auth-resume"
 import pkg from "../package.json"
 import { ServerConnection } from "@/runtime/server/registry"
 
@@ -36,6 +37,10 @@ const getRootNotFoundError = () => {
 }
 
 const root = document.getElementById("root")
+const authResume = authResumeTarget(location.href)
+const isAuthResume = location.pathname === authResumePath
+
+if (authResume) window.location.replace(authResume)
 
 if (!(root instanceof HTMLElement) && import.meta.env.DEV) {
   throw new Error(getRootNotFoundError())
@@ -51,11 +56,11 @@ const clearAuthToken = () => {
 
 const web = createWebPlatform(pkg.version)
 
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+if (!isAuthResume && import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js"), { once: true })
 }
 
-if (import.meta.env.VITE_SENTRY_DSN) {
+if (!isAuthResume && import.meta.env.VITE_SENTRY_DSN) {
   init({
     dsn: import.meta.env.VITE_SENTRY_DSN,
     environment: import.meta.env.VITE_SENTRY_ENVIRONMENT ?? import.meta.env.MODE,
@@ -74,7 +79,7 @@ if (import.meta.env.VITE_SENTRY_DSN) {
   })
 }
 
-if (root instanceof HTMLElement && root.dataset.opencodeMounted === undefined) {
+if (!isAuthResume && root instanceof HTMLElement && root.dataset.opencodeMounted === undefined) {
   // Lazy chunks can import the entry chunk back under a distinct URL, so claim the root before async startup.
   root.dataset.opencodeMounted = ""
   void loadInitialLocale().then((locale) => {
